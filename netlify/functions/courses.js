@@ -26,10 +26,10 @@
 // - One-to-many: lecturers -> sections
 // And one more one-to-many: sections -> reviews
 // Therefore:
-// - The first model, courses, contains the following fields: courseNumber, name
-// - The second model, lecturers, contains the following fields: name
+// - The first model, courses, contains the following fields: courseNumber, courseName
+// - The second model, lecturers, contains the following fields: lecturerName
 // - The third model, sections, contains the following fields: courseId, lecturerId
-// - The fourth model, reviews, contains the following fields, sectionId, body, rating
+// - The fourth model, reviews, contains the following fields, sectionId, reviewComment, reviewRating
 
 // allows us to use firebase
 let firebase = require(`./firebase`)
@@ -58,7 +58,9 @@ exports.handler = async function(event) {
   // create an object with the course data to hold the return value from our lambda
   let returnValue = {
     courseNumber: courseData.courseNumber,
-    name: courseData.name
+    courseName: courseData.courseName,
+    courseReviews: 0,
+    courseAverageRating: 0
   }
 
   // set a new Array as part of the return value
@@ -79,8 +81,12 @@ exports.handler = async function(event) {
     let sectionData = sections[i].data()
     
     // create an Object to be added to the return value of our lambda
-    let sectionObject = {}
-
+    let sectionObject = {
+      reviews: [],
+      totalNumberOfReviews: 0,
+      sectionAverageRating: 0
+    }
+    
     // ask Firebase for the lecturer with the ID provided by the section; hint: read "Retrieve One Document (when you know the Document ID)" in the reference
     let lecturerQuery = await db.collection('lecturers').doc(sectionData.lecturerId).get()
 
@@ -88,13 +94,50 @@ exports.handler = async function(event) {
     let lecturer = lecturerQuery.data()
 
     // add the lecturer's name to the section Object
-    sectionObject.lecturerName = lecturer.name
+    sectionObject.lecturerName = lecturer.lecturerName
 
     // add the section Object to the return value
     returnValue.sections.push(sectionObject)
 
     // 🔥 your code for the reviews/ratings goes here
+
+    // Get the reviews for this section, wait for it to return, store in memory
+    let reviewQuery = await db.collection('reviews').where('sectionId', `==`, sectionId).get()
+
+    // Get the documents from the query
+    let reviews = reviewQuery.docs
+    
+    // Loop through the review documents
+    for (let j=0; j < reviews.length; j++) {
+      
+      // Get the data from the review document
+      let reviewData = reviews[j].data()
+      
+      // Create an object to be added to the reviews array of the section
+      let reviewObject = {
+        rating: reviewData.reviewRating,
+        comment: reviewData.reviewComment
+      }
+
+      // Index section review counter
+      sectionObject.totalNumberOfReviews = sectionObject.totalNumberOfReviews + 1
+      
+      // Index course review counter
+      returnValue.courseReviews = returnValue.courseReviews + 1
+
+      // Index section reviews average numerator
+      sectionObject.sectionAverageRating = (sectionObject.sectionAverageRating + reviewData.reviewRating)
+
+      // Index course reviews average numerator
+      returnValue.courseAverageRating = (returnValue.courseAverageRating + reviewData.reviewRating) 
+      // returnValue.courseReviews
+
+      // Add the review object to the section return value
+      sectionObject.reviews.push(reviewObject)
+    }
+    sectionObject.sectionAverageRating = sectionObject.sectionAverageRating / sectionObject.totalNumberOfReviews
   }
+  returnValue.courseAverageRating = returnValue.courseAverageRating / returnValue.courseReviews
 
   // return the standard response
   return {
